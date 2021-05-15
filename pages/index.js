@@ -1,65 +1,103 @@
-import Head from 'next/head'
-import styles from '../styles/Home.module.css'
+import { useEffect, useState } from 'react'
+
+import '../styles/Home.module.css'
+
+// This prevents tree shaking.
+require('sandstone')
+
+async function compile(code) {
+  const sandstone = require('sandstone')
+  const { dataPack } = require('sandstone/init')
+  dataPack.reset()
+
+  const regex = /^\s*import(?:\s+|\s*\{\s*(.+)\s*\}\s*)from ['"](\S+)['"]\s*$/gm
+  const imports = code.matchAll(regex)
+  const codeWithoutImports = code.replaceAll(regex, '')
+
+  for (const [_, variables, importedPkg] of imports) {
+    if (importedPkg !== 'sandstone') {
+      throw new Error('Cannot import anything else than sandstone.')
+    }
+    
+    eval(`const {${variables}} = sandstone;${codeWithoutImports}`)
+  }
+
+  const savePack = sandstone.savePack
+
+  const files = []
+  await savePack('myDataPack', {
+    customFileHandler: (fileInfo) => {
+      files.push(fileInfo)
+    },
+    indentation: 2,
+  })
+  return files
+}
+
+const DEFAULT_CODE = `
+import { MCFunction, say } from 'sandstone'
+
+MCFunction('test', () => { say('test!') })
+`.trim()
 
 export default function Home() {
-  return (
-    <div className={styles.container}>
-      <Head>
-        <title>Create Next App</title>
-        <link rel="icon" href="/favicon.ico" />
-      </Head>
+  const [files, setFiles] = useState([])
+  const [code, setCode] = useState(DEFAULT_CODE)
+  const [error, setError] = useState(null)
 
-      <main className={styles.main}>
-        <h1 className={styles.title}>
-          Welcome to <a href="https://nextjs.org">Next.js!</a>
-        </h1>
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return
+    }
 
-        <p className={styles.description}>
-          Get started by editing{' '}
-          <code className={styles.code}>pages/index.js</code>
-        </p>
+    compile(code)
+      .then(f => {
+        setError(null)
+        setFiles(f)
+      })
+      .catch(e => setError(e))
+  }, [setFiles, code])
 
-        <div className={styles.grid}>
-          <a href="https://nextjs.org/docs" className={styles.card}>
-            <h3>Documentation &rarr;</h3>
-            <p>Find in-depth information about Next.js features and API.</p>
-          </a>
+  if (typeof window === 'undefined') {
+    return null 
+  }
 
-          <a href="https://nextjs.org/learn" className={styles.card}>
-            <h3>Learn &rarr;</h3>
-            <p>Learn about Next.js in an interactive course with quizzes!</p>
-          </a>
-
-          <a
-            href="https://github.com/vercel/next.js/tree/master/examples"
-            className={styles.card}
-          >
-            <h3>Examples &rarr;</h3>
-            <p>Discover and deploy boilerplate example Next.js projects.</p>
-          </a>
-
-          <a
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=default-template&utm_campaign=create-next-app"
-            className={styles.card}
-          >
-            <h3>Deploy &rarr;</h3>
-            <p>
-              Instantly deploy your Next.js site to a public URL with Vercel.
-            </p>
-          </a>
-        </div>
-      </main>
-
-      <footer className={styles.footer}>
-        <a
-          href="https://vercel.com?utm_source=create-next-app&utm_medium=default-template&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          Powered by{' '}
-          <img src="/vercel.svg" alt="Vercel Logo" className={styles.logo} />
-        </a>
-      </footer>
+  const errorDiv = !error ? null : (
+    <div className="error">
+      { error.toString() }
     </div>
+  ) 
+
+  const result = files.map(file => {
+    const type = file.type
+    const typeDisplay = type[0].toUpperCase() + type.slice(1, -1)
+    return <div className="func">
+      <header>
+        <span className="display-type"># {typeDisplay}</span> {file.relativePath}
+      </header>
+      <br />
+      <code>
+        { file.content.split(/[\r\n]/g).map(line => <>{line}<br /></>) }
+      </code>
+    </div>
+  })
+
+  return (
+    <main className="main">
+      <div>
+        <textarea value={code} onChange={(event) => setCode(event.target.value) }></textarea>
+      </div>
+      { errorDiv }
+      <div>
+        <br />
+        {result}
+      </div>
+    </main>
   )
+}
+
+export function getStaticProps() {
+  return {
+    props: {}
+  }
 }
